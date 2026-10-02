@@ -5,21 +5,21 @@ from flask import Flask
 
 load_dotenv()
 
-# Fix env names - supports both your names and Render names
 API_KEY = os.getenv("BINANCE_API") or os.getenv("BINANCE_API_KEY")
 API_SECRET = os.getenv("BINANCE_SECRET") or os.getenv("BINANCE_API_SECRET")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+PROXY_URL = os.getenv("PROXY_URL") or "http://pjaaqimr:alt6s2a3hin@31.59.20.176:6754"
 
 SYMBOLS = ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","ADAUSDT","DOGEUSDT","AVAXUSDT","DOTUSDT","MATICUSDT","LINKUSDT","LTCUSDT","TRXUSDT","ETCUSDT","FILUSDT","UNIUSDT","ATOMUSDT","NEARUSDT","APTUSDT","ARBUSDT"]
 TAKE_PROFIT = 2.5
 STOP_LOSS = 4.0
 MIN_TRADE = 2.0
 
-# Fake web server so Render Web Service stays Live
+# Keep Render Web Service alive
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Timothy Bot Running"
+def home(): return "Timothy Bot Running - OK"
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
@@ -27,7 +27,7 @@ threading.Thread(target=run_web, daemon=True).start()
 
 def tg(msg):
     try:
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": TELEGRAM_CHAT_ID, "text": msg}, timeout=5)
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": TELEGRAM_CHAT_ID, "text": msg}, timeout=10)
         print(f"TG: {msg}")
     except Exception as e:
         print(f"TG error {e}")
@@ -43,15 +43,21 @@ def get_rsi(closes, p=14):
     rs = avg_gain/avg_loss
     return 100 - (100/(1+rs))
 
-# --- BINANCE CONNECTION WITH ANTI-BLOCK ---
 def create_client():
-    endpoints = [
-        "https://api1.binance.com",
-        "https://api2.binance.com",
-        "https://api3.binance.com",
-        "https://api-gcp.binance.com",
-    ]
-    for ep in endpoints:
+    # 1. Try with Webshare proxy + api1 (fixes Render block)
+    if PROXY_URL:
+        try:
+            print(f"Trying proxy...")
+            c = Client(API_KEY, API_SECRET, requests_params={"proxies": {"http": PROXY_URL, "https": PROXY_URL}, "timeout": 30})
+            c.API_URL = "https://api1.binance.com/api"
+            c.ping()
+            print("Connected via PROXY!")
+            return c
+        except Exception as e:
+            print(f"Proxy fail: {e}")
+
+    # 2. Try api1, api2, api3 without proxy
+    for ep in ["https://api1.binance.com","https://api2.binance.com","https://api3.binance.com","https://api-gcp.binance.com"]:
         try:
             print(f"Trying {ep}...")
             c = Client(API_KEY, API_SECRET)
@@ -62,6 +68,7 @@ def create_client():
         except Exception as e:
             print(f"{ep} failed: {e}")
             continue
+    # last resort
     return Client(API_KEY, API_SECRET)
 
 client = create_client()
@@ -70,6 +77,7 @@ print("Connected to Binance!")
 
 holding = None
 buy_price = 0
+
 try:
     acc = client.get_account()
     for b in acc['balances']:
@@ -92,13 +100,14 @@ except Exception as e:
     print(f"balance error {e}")
 
 if not holding:
-    print(f"BOT STARTED - No holding - MIN ${MIN_TRADE} no MAX")
-    tg(f"Bot started - USDT check - Connected OK")
+    print(f"BOT STARTED - No holding - MIN ${MIN_TRADE}")
+    tg(f"Bot started - Connected OK - USDT check")
 
 while True:
     try:
         usdt_bal = float(client.get_asset_balance(asset='USDT')['free'])
         trade_amount = usdt_bal * 0.95 if usdt_bal > MIN_TRADE*2 else usdt_bal
+
         if holding is None:
             best = None
             best_rsi = 100
@@ -111,7 +120,8 @@ while True:
                     if rsi < best_rsi and rsi < 35:
                         best_rsi = rsi
                         best = symbol
-                except: pass
+                except Exception as e:
+                    print(f"{symbol} kline error {e}")
             if best and trade_amount >= MIN_TRADE:
                 print(f"BUY SIGNAL {best} RSI {best_rsi:.1f} amount ${trade_amount:.2f}")
                 info = client.get_symbol_info(best)
