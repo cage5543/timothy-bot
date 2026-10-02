@@ -1,17 +1,29 @@
 from binance.client import Client
-import time, math, requests, os
+import time, math, requests, os, threading
 from dotenv import load_dotenv
+from flask import Flask
 
 load_dotenv()
-API_KEY = os.getenv("BINANCE_API")
-API_SECRET = os.getenv("BINANCE_SECRET")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+
+# Fix env names - supports both your names and Render names
+API_KEY = os.getenv("BINANCE_API") or os.getenv("BINANCE_API_KEY")
+API_SECRET = os.getenv("BINANCE_SECRET") or os.getenv("BINANCE_API_SECRET")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 SYMBOLS = ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","ADAUSDT","DOGEUSDT","AVAXUSDT","DOTUSDT","MATICUSDT","LINKUSDT","LTCUSDT","TRXUSDT","ETCUSDT","FILUSDT","UNIUSDT","ATOMUSDT","NEARUSDT","APTUSDT","ARBUSDT"]
 TAKE_PROFIT = 2.5
 STOP_LOSS = 4.0
 MIN_TRADE = 2.0
+
+# Fake web server so Render Web Service stays Live
+app = Flask(__name__)
+@app.route('/')
+def home(): return "Timothy Bot Running"
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
+threading.Thread(target=run_web, daemon=True).start()
 
 def tg(msg):
     try:
@@ -31,7 +43,28 @@ def get_rsi(closes, p=14):
     rs = avg_gain/avg_loss
     return 100 - (100/(1+rs))
 
-client = Client(API_KEY, API_SECRET)
+# --- BINANCE CONNECTION WITH ANTI-BLOCK ---
+def create_client():
+    endpoints = [
+        "https://api1.binance.com",
+        "https://api2.binance.com",
+        "https://api3.binance.com",
+        "https://api-gcp.binance.com",
+    ]
+    for ep in endpoints:
+        try:
+            print(f"Trying {ep}...")
+            c = Client(API_KEY, API_SECRET)
+            c.API_URL = ep + "/api"
+            c.ping()
+            print(f"Connected with {ep}!")
+            return c
+        except Exception as e:
+            print(f"{ep} failed: {e}")
+            continue
+    return Client(API_KEY, API_SECRET)
+
+client = create_client()
 client.RECV_WINDOW = 60000
 print("Connected to Binance!")
 
@@ -60,7 +93,7 @@ except Exception as e:
 
 if not holding:
     print(f"BOT STARTED - No holding - MIN ${MIN_TRADE} no MAX")
-    tg(f"Bot started - USDT check")
+    tg(f"Bot started - USDT check - Connected OK")
 
 while True:
     try:
