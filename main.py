@@ -4,12 +4,12 @@ from dotenv import load_dotenv
 load_dotenv()
 from binance.client import Client
 
-API_KEY = os.getenv("BINANCE_API","")
-API_SECRET = os.getenv("BINANCE_SECRET","")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN","")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID","")
-PROXY_URL = os.getenv("PROXY_URL","")
-
+API_KEY = os.getenv("BINANCE_API","").strip()
+API_SECRET = os.getenv("BINANCE_SECRET","").strip()
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN","").strip()
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID","").strip()
+PROXY_URL = os.getenv("PROXY_URL","").strip()
+PROXY_URL = os.getenv("PROXY_URL","").strip()
 SYMBOLS = ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT"]
 
 app = Flask(__name__)
