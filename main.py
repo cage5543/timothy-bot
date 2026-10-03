@@ -14,65 +14,84 @@ SYMBOLS = ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","ADAUSDT","DOGEUSDT
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Timothy Bot LIVE - Trading"
+def home(): return "Timothy Bot LIVE - Trading Active"
 
 def run_web():
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
-
 threading.Thread(target=run_web, daemon=True).start()
 
 def tg(m):
-    try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": TELEGRAM_CHAT_ID, "text": m}, timeout=10)
+    try:
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": TELEGRAM_CHAT_ID, "text": m}, timeout=10)
     except: pass
 
 def get_rsi(closes, p=14):
-    if len(closes)<p+1: return 50
-    deltas=[closes[i]-closes[i-1] for i in range(1,len(closes))]
-    gains=[max(0,d) for d in deltas[-p:]]
-    losses=[max(0,-d) for d in deltas[-p:]]
-    avg_g=sum(gains)/p; avg_l=sum(losses)/p
-    if avg_l==0: return 80
-    rs=avg_g/avg_l
-    return 100-(100/(1+rs))
+    if len(closes) < p+1: return 50
+    deltas = [closes[i]-closes[i-1] for i in range(1,len(closes))]
+    gains = [max(0,d) for d in deltas[-p:]]
+    losses = [max(0,-d) for d in deltas[-p:]]
+    avg_g = sum(gains)/p; avg_l = sum(losses)/p
+    if avg_l == 0: return 80
+    return 100-(100/(1+avg_g/avg_l))
 
 print("=== BOOTING BOT ===")
-print(f"API_KEY exists: {bool(API_KEY)}")
-print(f"Proxy: {PROXY_URL}")
-
-# CONNECT BINANCE WITH PROXY
-client=None
+client = None
 try:
-    print("Trying BINANCE via PROXY + api1...")
+    print("Trying via PROXY + api1...")
     client = Client(API_KEY, API_SECRET, requests_params={"proxies":{"http":PROXY_URL,"https":PROXY_URL},"timeout":30})
     client.API_URL = "https://api1.binance.com/api"
     client.ping()
-    print("BINANCE CONNECTED VIA PROXY + api1!")
-    tg("Bot Live - Binance via Proxy OK")
+    print("BINANCE CONNECTED VIA PROXY!")
+    tg("✅ Timothy Bot Live - Proxy OK")
 except Exception as e:
-    print(f"Proxy fail: {e}")
+    print(f"Proxy fail {e}, trying direct api1")
     try:
-        print("Trying direct api1...")
         client = Client(API_KEY, API_SECRET)
         client.API_URL = "https://api1.binance.com/api"
         client.ping()
-        print("BINANCE CONNECTED DIRECT api1")
+        print("BINANCE CONNECTED DIRECT")
     except Exception as e2:
-        print(f"BINANCE FAILED: {e2}")
+        print(f"BINANCE FAILED {e2}")
 
-if client:
-    client.RECV_WINDOW=60000
-    holding=None; buy_price=0
-    print("Starting trading loop...")
+if not client:
     while True:
-        try:
-            usdt=float(client.get_asset_balance(asset='USDT')['free'])
-            print(f"USDT {usdt:.2f} | Holding {holding}")
-            # Your RSI logic here - simplified for now
-            time.sleep(20)
-        except Exception as e:
-            print(f"Loop error: {e}")
-            time.sleep(10)
-else:
-    while True:
-        print("No Binance client - waiting")
+        print("No client, waiting 60s")
         time.sleep(60)
+
+client.RECV_WINDOW = 60000
+holding = None
+buy_price = 0
+
+print("Starting RSI trading loop...")
+while True:
+    try:
+        for symbol in SYMBOLS:
+            klines = client.get_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_15MINUTE, limit=50)
+            closes = [float(k[4]) for k in klines]
+            rsi = get_rsi(closes)
+            price = closes[-1]
+            print(f"{symbol} RSI {rsi:.1f} Price {price}")
+
+            if holding is None and rsi < 30:
+                usdt = float(client.get_asset_balance(asset='USDT')['free'])
+                if usdt > 10:
+                    qty = math.floor((usdt*0.95 / price)*100000)/100000
+                    if qty > 0:
+                        client.order_market_buy(symbol=symbol, quantity=qty)
+                        holding = symbol; buy_price = price
+                        tg(f"BUY {symbol} @ {price} RSI {rsi:.1f}")
+                        break
+
+            if holding == symbol and rsi > 70:
+                asset = symbol.replace("USDT","")
+                bal = float(client.get_asset_balance(asset=asset)['free'])
+                if bal > 0:
+                    client.order_market_sell(symbol=symbol, quantity=bal)
+                    tg(f"SELL {symbol} @ {price} Profit {(price-buy_price)/buy_price*100:.2f}%")
+                    holding = None
+                    break
+
+        time.sleep(30)
+    except Exception as e:
+        print(f"Loop error {e}")
+        time.sleep(15)
